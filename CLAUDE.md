@@ -10,6 +10,7 @@ Local Wispr Flow clone for macOS: a menu-bar dictation app. Click the mic icon, 
 
 ```sh
 uv venv --python 3.12 && uv pip install -e .   # setup (first run downloads ~1.2GB model)
+./build.sh                                     # compile the .app launcher (after venv changes / new machine)
 
 .venv/bin/whisperflow          # run the menu-bar app
 .venv/bin/whisperflow --raw    # without the Claude cleanup pass
@@ -31,7 +32,9 @@ The hosting terminal needs Microphone and Accessibility permissions (System Sett
 
 ### The .app wrapper
 
-`build/WhisperFlow.app` is a thin wrapper — a zsh launcher (`Contents/MacOS/WhisperFlow`) that resolves the project root relative to itself and execs `.venv/bin/whisperflow`. It exists so the sibling ApplicationManager project (which discovers `*.app` bundles under `menuBarApps/`) can list, launch, and quit this app; it matches by the `com.whisperflow.app` bundle ID, which survives the exec. The `MenuBarSymbolName` key in its Info.plist is what ApplicationManager reads for the list icon. The wrapper breaks if the venv is missing or the bundle is moved out of the project (it shows an alert instead of failing silently).
+`build/WhisperFlow.app` is a thin wrapper — a compiled C launcher (`launcher.c`, built by `build.sh`) that runs the whisperflow package **in-process via libpython**. It must not be a script that execs the venv interpreter: on this macOS the window server silently parks the status item off-screen (x=-1, fully invisible, no error) whenever a bundle-launched process has exec'd a binary other than its declared CFBundleExecutable. The launcher resolves the project root relative to its own path, puts the project root + venv site-packages on PYTHONPATH (the editable-install `.pth` is not honored there), and prepends `/opt/homebrew/bin` to PATH so the cleanup pass finds the `claude` CLI. When called with arguments it behaves as a plain interpreter (argv passthrough), so `sys.executable` re-invocations like multiprocessing don't spawn a second app.
+
+The wrapper exists so the sibling ApplicationManager project (which discovers `*.app` bundles under `menuBarApps/`) can list, launch, and quit this app; it matches by the `com.whisperflow.app` bundle ID. The `MenuBarSymbolName` key in Info.plist is what ApplicationManager reads for the list icon. The launcher shows an alert if the venv is missing, and links libpython via an rpath into the uv-managed CPython behind `.venv` — rerun `./build.sh` if that moves.
 
 ## Architecture
 
