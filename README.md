@@ -1,15 +1,16 @@
 # whisperFlow
 
-Local Wispr Flow clone for macOS: hold a key, speak, release — text appears.
-On-device transcription via NVIDIA Parakeet TDT v3 (MLX, runs on Apple Silicon),
-with a Claude Haiku cleanup pass planned (milestone 3).
+Local Wispr Flow clone for macOS, driven from the menu bar: click the mic icon,
+speak, and the cleaned-up text pastes wherever your cursor is. Transcription is
+fully on-device (NVIDIA Parakeet TDT v3 via MLX); a Claude Haiku pass removes
+filler words and fixes formatting.
 
-## Status: milestone 3
+## Status: milestone 4
 
-- [x] Hold-key push-to-talk → mic capture (with 500ms pre-roll) → Parakeet transcript printed to terminal
-- [x] Milestone 2: insert text into the focused app (clipboard + Cmd-V, clipboard restored after)
-- [x] Milestone 3: Claude Haiku cleanup pass (filler removal, formatting, personal dictionary, per-app tone)
-- [ ] Milestone 4: skip-short-utterance rule, secure-input detection, menu-bar UI
+- [x] Mic capture (with 500ms pre-roll) → Parakeet transcription on-device
+- [x] Insert text into the focused app (clipboard + Cmd-V, clipboard restored after)
+- [x] Claude Haiku cleanup pass (filler removal, formatting, personal dictionary, per-app tone)
+- [x] Menu-bar app: click to start, auto-stop on silence (or click again); secure-input detection
 
 ## Setup
 
@@ -23,26 +24,30 @@ First run downloads the ~1.2GB Parakeet model from HuggingFace.
 ## Usage
 
 ```sh
-# push-to-talk: hold RIGHT OPTION, speak, release -> cleaned text pastes at the cursor
+# the app: mic icon appears in the menu bar
 .venv/bin/whisperflow
 
-# skip the Claude cleanup pass (raw Parakeet transcript)
+# without the Claude cleanup pass
 .venv/bin/whisperflow --raw
-
-# terminal output only (no pasting)
-.venv/bin/whisperflow --print-only
-
-# paste test without the mic: focus any text field within 3s
-.venv/bin/whisperflow type "hello from whisperflow"
-
-# cleanup test without the mic
-.venv/bin/whisperflow clean "um so can you uh send the report by like friday no wait thursday"
-
-# transcribe a wav without mic/hotkey (16kHz mono; convert with afconvert)
-.venv/bin/whisperflow transcribe path/to/audio.wav
 ```
 
-Quick self-test without speaking:
+- **Click the mic** → recording starts (icon fills in)
+- **Stop talking for ~2s** → recording stops by itself, text pastes at your cursor
+- **Or click again** → stops immediately
+- **Right-click** → Quit
+- Icon states: hourglass = loading model · mic = idle · filled mic = recording ·
+  waveform = transcribing/cleaning
+- If you click by accident and say nothing, it cancels itself after 10s
+
+Test helpers (no mic/menu bar needed):
+
+```sh
+.venv/bin/whisperflow transcribe path/to/16khz-mono.wav
+.venv/bin/whisperflow type "hello"     # pastes after 3s — focus a text field
+.venv/bin/whisperflow clean "um so can you uh send the report by like friday no wait thursday"
+```
+
+Quick transcription self-test without speaking:
 
 ```sh
 say -o /tmp/t.aiff "testing one two three" && afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/t.aiff /tmp/t.wav
@@ -67,12 +72,19 @@ get corrected to those exact spellings.
 
 ## Permissions
 
-Push-to-talk mode needs your terminal app to have, under System Settings → Privacy & Security:
+Under System Settings → Privacy & Security, the app hosting whisperflow (your
+terminal, while prototyping) needs:
 
-- **Microphone** (prompted automatically on first run)
-- **Input Monitoring** and **Accessibility** (for the global hotkey listener; add your terminal manually)
+- **Microphone** (prompted automatically on first recording)
+- **Accessibility** (to post the Cmd-V paste keystroke; add your terminal manually)
+
+No Input Monitoring needed — there are no global hotkeys.
+
+Pasting is skipped automatically when a password field holds secure event input
+(the text would otherwise vanish into the password box).
 
 ## Performance (M-series, measured)
 
 - Model load: ~0.7s (warm start; 43s first-ever download)
 - Warm transcription: **~0.06s** for a 3.5s utterance
+- Haiku cleanup: ~0.5–1s for typical dictation (skipped for short utterances)

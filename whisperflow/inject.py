@@ -12,10 +12,20 @@ Accessibility permission; without it the event is silently dropped.
 
 from __future__ import annotations
 
+import ctypes
 import time
 
 import Quartz
 from AppKit import NSPasteboard, NSPasteboardTypeString
+
+_carbon = ctypes.CDLL("/System/Library/Frameworks/Carbon.framework/Carbon")
+
+
+def secure_input_active() -> bool:
+    """True when a password field (or Terminal's Secure Keyboard Entry) holds
+    secure event input — synthetic keystrokes are pointless and the paste
+    would land in a password box. Callers should skip pasting."""
+    return bool(_carbon.IsSecureEventInputEnabled())
 
 KEY_V = 9  # kVK_ANSI_V
 
