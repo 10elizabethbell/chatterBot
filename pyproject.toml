@@ -8,6 +8,7 @@ dependencies = [
     "sounddevice>=0.5",
     "numpy>=1.26",
     "pynput>=1.7",
+    "anthropic>=0.60",
     # keep the resolver off numba 0.53 (pulled in via parakeet-mlx -> librosa)
     "numba>=0.60",
 ]
