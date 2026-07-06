@@ -92,6 +92,7 @@ class WhisperFlowApp(NSObject):
             from whisperflow.cleanup import Cleaner
 
             cleaner = Cleaner()
+            cleaner.warm_up()
         self._transcriber, self._recorder, self._cleaner = transcriber, recorder, cleaner
         self._set_state(IDLE)
         print("[app] ready — click the mic in the menu bar", flush=True)

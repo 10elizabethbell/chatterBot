@@ -56,12 +56,18 @@ say -o /tmp/t.aiff "testing one two three" && afconvert -f WAVE -d LEI16@16000 -
 
 ## Claude cleanup pass
 
-Uses `claude-haiku-4-5` via the Anthropic API to remove filler words, apply
-self-corrections ("friday no wait thursday" → "Thursday"), fix formatting, and
-match tone to the frontmost app. Needs `ANTHROPIC_API_KEY` in your environment
-(or an `ant auth login` profile). Without credentials — or on any API error or
-timeout — the raw transcript is pasted instead; dictation never blocks on the
-network for more than 8s.
+Spawns **headless Claude Code** (`claude -p --bare --model haiku`) per
+utterance to remove filler words, apply self-corrections ("friday no wait
+thursday" → "Thursday"), fix formatting, and match tone to the frontmost app.
+It rides your existing Claude Code login — **no API key needed**; just be
+logged in (`claude`, then `/login` if prompted). A warm-up call fires at app
+start so auth problems surface immediately and the first dictation isn't the
+slowest.
+
+On any failure — not logged in, timeout (15s cap), CLI error — the raw
+transcript is pasted instead; dictation never silently eats your words.
+Note the per-call CLI startup adds latency vs. a direct API call (roughly
+1–3s typical); `--raw` skips the pass entirely if that bothers you.
 
 Utterances under 5 words skip the LLM entirely (they're pasted as-is; Parakeet
 already punctuates).
