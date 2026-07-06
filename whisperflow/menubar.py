@@ -4,8 +4,9 @@ Left-click toggles recording. While recording, a timer polls the
 recorder's VAD state and auto-stops once you've spoken and then gone
 quiet for AUTO_STOP_SILENCE seconds. Right-click shows a menu (Quit).
 
-Icon states: hourglass = model loading, mic = idle, mic.fill = recording,
-waveform = transcribing/cleaning.
+Icon: the whisperflow logo (circle + wave, see icons.py) — faint while
+the model loads, outlined when idle, filled while recording, dimmed-filled
+while transcribing/cleaning.
 
 Transcription + cleanup + paste run on a worker thread so the menu bar
 never blocks on the Haiku call; icon updates hop back to the main thread.
@@ -21,7 +22,6 @@ from AppKit import (
     NSEventMaskLeftMouseUp,
     NSEventMaskRightMouseUp,
     NSEventTypeRightMouseUp,
-    NSImage,
     NSMenu,
     NSMenuItem,
     NSStatusBar,
@@ -35,12 +35,7 @@ NO_SPEECH_TIMEOUT = 10.0  # cancel if nothing was said at all
 MAX_UTTERANCE = 120.0  # hard cap
 
 LOADING, IDLE, RECORDING, PROCESSING = "loading", "idle", "recording", "processing"
-ICONS = {
-    LOADING: "hourglass",
-    IDLE: "mic",
-    RECORDING: "mic.fill",
-    PROCESSING: "waveform",
-}
+STATES = (LOADING, IDLE, RECORDING, PROCESSING)
 
 
 class WhisperFlowApp(NSObject):
@@ -58,6 +53,9 @@ class WhisperFlowApp(NSObject):
     # --- lifecycle ---
 
     def applicationDidFinishLaunching_(self, _notification) -> None:
+        from whisperflow.icons import logo
+
+        self._icons = {state: logo(state) for state in STATES}
         self._status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(
             NSVariableStatusItemLength
         )
@@ -176,10 +174,7 @@ class WhisperFlowApp(NSObject):
 
     @objc.python_method
     def _apply_icon(self) -> None:
-        image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            ICONS[self._state], "whisperflow"
-        )
-        self._status_item.button().setImage_(image)
+        self._status_item.button().setImage_(self._icons[self._state])
 
 
 def run(use_llm: bool = True) -> None:
