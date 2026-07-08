@@ -2,7 +2,7 @@ class Chatterbox < Formula
   desc "Local Wispr Flow clone: on-device dictation with menu-bar UI"
   homepage "https://github.com/10elizabethbell/chatterBox"
   url "https://github.com/10elizabethbell/chatterBox/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "5f126a5cc7f9065e42af963c44b21a815a493948a4e91e589696b45585e8cd66"
+  sha256 "ec3c7c0a962848e1e5d27594efcc7649b6736927b6c2e4dbb96dee41eb58f78c"
   head "https://github.com/10elizabethbell/chatterBox.git", branch: "main"
 
   depends_on "python@3.12"
