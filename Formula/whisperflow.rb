@@ -1,6 +1,8 @@
 class Whisperflow < Formula
   desc "Local Wispr Flow clone: on-device dictation with menu-bar UI"
   homepage "https://github.com/10elizabethbell/whisperFlow"
+  url "https://github.com/10elizabethbell/whisperFlow/archive/refs/tags/v0.1.0.tar.gz"
+  sha256 "5f126a5cc7f9065e42af963c44b21a815a493948a4e91e589696b45585e8cd66"
   head "https://github.com/10elizabethbell/whisperFlow.git", branch: "main"
 
   depends_on "python@3.12"

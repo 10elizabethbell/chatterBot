@@ -16,7 +16,7 @@ filler words and fixes formatting.
 
 ```sh
 brew tap 10elizabethbell/whisperflow https://github.com/10elizabethbell/whisperFlow
-brew install --HEAD 10elizabethbell/whisperflow/whisperflow
+brew install 10elizabethbell/whisperflow/whisperflow
 ```
 
 First run downloads the ~1.2GB Parakeet model from HuggingFace.

@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
         if (access(site, F_OK) != 0) {
             system("osascript -e 'display alert \"WhisperFlow\" message "
                    "\"No Python environment found. Install via homebrew: "
-                   "brew install --HEAD 10elizabethbell/whisperflow/whisperflow, "
+                   "brew install 10elizabethbell/whisperflow/whisperflow, "
                    "or in the project directory: "
                    "uv venv --python 3.12 && uv pip install -e .\" as critical'");
             return 1;
