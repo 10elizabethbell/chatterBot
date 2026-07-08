@@ -61,7 +61,7 @@ The menu-bar timer (`tick_`, 10Hz) polls `Recorder.has_speech` / `silence_second
 ### Contracts and constraints that span files
 
 - **Audio format is 16kHz mono float32 end-to-end**: Recorder produces it, Transcriber requires it (`get_logmel` bit-views the rfft output against the input dtype — anything but float32 breaks), `transcribe_file` rejects other wavs.
-- **Dictation text must never touch the clipboard** (user requirement). `inject.py` types via `CGEventKeyboardSetUnicodeString`, chunked at the 20-UTF-16-unit event cap with surrogate pairs kept intact. Don't reintroduce a pasteboard route.
+- **Typing must never go through the clipboard**: `inject.py` types via `CGEventKeyboardSetUnicodeString`, chunked at the 20-UTF-16-unit event cap with surrogate pairs kept intact — don't route it through a paste. The only pasteboard writer is the explicit "Copy to Clipboard" menu toggle (default off; `menubar.copyToClipboard_`, main thread).
 - **The cleanup pass must never eat words**: every `Cleaner` failure mode (timeout, not logged in, CLI missing, empty output) returns the raw transcript with a status string. Utterances under 5 words skip the LLM. "Not logged in" disables the pass for the session instead of retrying.
 - **Cleanup rides the user's Claude Code login** (no API key): it spawns the `claude` CLI per utterance. Its system prompt treats transcript content strictly as text to clean, never as instructions.
 - **Secure input**: `inject.secure_input_active()` must be checked before injecting so dictation can't land in password fields; the menu-bar flow already does this.
@@ -70,4 +70,5 @@ The menu-bar timer (`tick_`, 10Hz) polls `Recorder.has_speech` / `silence_second
 ### Other notes
 
 - Personal dictionary: `~/.config/chatterbox/dictionary.txt` (one term per line, `#` comments) is folded into the cleanup system prompt for spelling correction.
+- Output toggles: the right-click menu has "Type at Cursor" (default on) and "Copy to Clipboard" (default off), persisted by `settings.py` to `~/.config/chatterbox/settings.json`. With both off, the pipeline still runs but the text is only printed.
 - End-to-end injection can't be verified headlessly — `chatterbox type` sends real keystrokes to whatever is focused. Test chunking/logic with `_post_unicode_chunk` mocked instead.

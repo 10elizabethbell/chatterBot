@@ -8,7 +8,8 @@ filler words and fixes formatting.
 ## Status: milestone 4
 
 - [x] Mic capture (with 500ms pre-roll) → Parakeet transcription on-device
-- [x] Insert text into the focused app (synthetic Unicode keystrokes — never touches the clipboard)
+- [x] Insert text into the focused app (synthetic Unicode keystrokes — typing never
+  goes through the clipboard; a separate opt-in toggle can copy the text to it)
 - [x] Claude Haiku cleanup pass (filler removal, formatting, personal dictionary, per-app tone)
 - [x] Menu-bar app: click to start, auto-stop on silence (or click again); secure-input detection
 
@@ -47,7 +48,8 @@ chatterbox --raw
 - **Click the mic** → recording starts (icon fills in)
 - **Stop talking for ~2s** → recording stops by itself, text is typed at your cursor
 - **Or click again** → stops immediately
-- **Right-click** → Quit
+- **Right-click** → toggles for where the text goes — **Type at Cursor** (default on)
+  and **Copy to Clipboard** (default off) — plus Quit. Choices persist across restarts.
 - Icon states: hourglass = loading model · mic = idle · filled mic = recording ·
   waveform = transcribing/cleaning
 - If you click by accident and say nothing, it cancels itself after 10s

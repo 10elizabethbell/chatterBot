@@ -2,7 +2,9 @@
 
 Left-click toggles recording. While recording, a timer polls the
 recorder's VAD state and auto-stops once you've spoken and then gone
-quiet for AUTO_STOP_SILENCE seconds. Right-click shows a menu (Quit).
+quiet for AUTO_STOP_SILENCE seconds. Right-click shows a menu with two
+output toggles (Type at Cursor, Copy to Clipboard — persisted via
+settings.py) and Quit.
 
 Icon: the chatterbox logo (circle + wave, see icons.py) — faint while
 the model loads, outlined when idle, filled while recording, dimmed-filled
@@ -19,16 +21,22 @@ import threading
 from AppKit import (
     NSApplication,
     NSApplicationActivationPolicyAccessory,
+    NSControlStateValueOff,
+    NSControlStateValueOn,
     NSEventMaskLeftMouseUp,
     NSEventMaskRightMouseUp,
     NSEventTypeRightMouseUp,
     NSMenu,
     NSMenuItem,
+    NSPasteboard,
+    NSPasteboardTypeString,
     NSStatusBar,
     NSVariableStatusItemLength,
 )
 import objc
 from Foundation import NSObject, NSTimer
+
+from chatterbox import settings
 
 AUTO_STOP_SILENCE = 2.0  # stop this many seconds after the speaker goes quiet
 NO_SPEECH_TIMEOUT = 10.0  # cancel if nothing was said at all
@@ -44,6 +52,7 @@ class ChatterBoxApp(NSObject):
         if self is None:
             return None
         self._use_llm = use_llm
+        self._settings = settings.load()
         self._state = LOADING
         self._recorder = None
         self._transcriber = None
@@ -66,10 +75,22 @@ class ChatterBoxApp(NSObject):
         self._apply_icon()
 
         self._menu = NSMenu.alloc().init()
+        self._type_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Type at Cursor", "toggleTypeAtCursor:", ""
+        )
+        self._type_item.setTarget_(self)
+        self._menu.addItem_(self._type_item)
+        self._copy_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Copy to Clipboard", "toggleCopyToClipboard:", ""
+        )
+        self._copy_item.setTarget_(self)
+        self._menu.addItem_(self._copy_item)
+        self._menu.addItem_(NSMenuItem.separatorItem())
         quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Quit chatterbox", "terminate:", "q"
         )
         self._menu.addItem_(quit_item)
+        self._apply_menu_states()
 
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             0.1, self, "tick:", None, True
@@ -109,6 +130,33 @@ class ChatterBoxApp(NSObject):
         elif self._state == RECORDING:
             self._finish_recording("clicked")
         # LOADING / PROCESSING: ignore clicks
+
+    def toggleTypeAtCursor_(self, _sender) -> None:
+        self._toggle("type_at_cursor")
+
+    def toggleCopyToClipboard_(self, _sender) -> None:
+        self._toggle("copy_to_clipboard")
+
+    @objc.python_method
+    def _toggle(self, key: str) -> None:
+        self._settings[key] = not self._settings[key]
+        settings.save(self._settings)
+        self._apply_menu_states()
+        if not (self._settings["type_at_cursor"] or self._settings["copy_to_clipboard"]):
+            print("  ⚠ both outputs are off — dictation will go nowhere", flush=True)
+
+    @objc.python_method
+    def _apply_menu_states(self) -> None:
+        self._type_item.setState_(
+            NSControlStateValueOn
+            if self._settings["type_at_cursor"]
+            else NSControlStateValueOff
+        )
+        self._copy_item.setState_(
+            NSControlStateValueOn
+            if self._settings["copy_to_clipboard"]
+            else NSControlStateValueOff
+        )
 
     def tick_(self, _timer) -> None:
         if self._state != RECORDING:
@@ -153,14 +201,30 @@ class ChatterBoxApp(NSObject):
                 text, status = self._cleaner.clean(text, frontmost_app_name())
                 print(f"  ✦ {status}: {text!r}", flush=True)
             if text:
-                if secure_input_active():
-                    print("  ⚠ secure input field active — not typing", flush=True)
-                else:
-                    insert_text(text + " ")
+                delivered = []
+                if self._settings["copy_to_clipboard"]:
+                    # NSPasteboard isn't documented thread-safe — hop to main
+                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                        "copyToClipboard:", text, False
+                    )
+                    delivered.append("clipboard")
+                if self._settings["type_at_cursor"]:
+                    if secure_input_active():
+                        print("  ⚠ secure input field active — not typing", flush=True)
+                    else:
+                        insert_text(text + " ")
+                        delivered.append("typed")
+                if not delivered:
+                    print("  ⚠ both outputs disabled — text not delivered", flush=True)
         except Exception as e:  # noqa: BLE001 — keep the app alive no matter what
             print(f"  ⚠ error: {e!r}", flush=True)
         finally:
             self._set_state(IDLE)
+
+    def copyToClipboard_(self, text) -> None:
+        pb = NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        pb.setString_forType_(str(text), NSPasteboardTypeString)
 
     # --- icon/state (safe to call from any thread) ---
 
