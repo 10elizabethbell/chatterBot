@@ -54,6 +54,28 @@ chatterbot --raw
   waveform = transcribing/cleaning
 - If you click by accident and say nothing, it cancels itself after 10s
 
+### Running without a terminal
+
+The install includes a regular Mac app, so nothing needs to stay attached to a
+terminal:
+
+```sh
+open /opt/homebrew/opt/chatterbot/Applications/ChatterBot.app
+# from a source checkout: open build/ChatterBot.app
+```
+
+No Dock icon appears — just the mic in the menu bar. To start it automatically,
+add ChatterBot.app under System Settings → General → Login Items & Extensions →
+"Open at Login".
+
+Two differences from running `chatterbot` in a terminal:
+
+- Permissions attach to ChatterBot.app instead of your terminal — grant it
+  Accessibility manually (typing silently does nothing without it); Microphone
+  prompts on first recording.
+- There's no console output. The icon states still show what it's doing; if
+  something misbehaves, run `chatterbot` from a terminal once to see the log.
+
 Test helpers (no mic/menu bar needed):
 
 ```sh
