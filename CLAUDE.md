@@ -42,11 +42,27 @@ Pipeline, one module per stage, orchestrated by `menubar.py`:
 
 ```
 menubar.py (AppKit status item, state machine)
-  → audio.py      Recorder: continuous mic stream, 500ms pre-roll ring buffer, energy VAD
+  → audio.py      Recorder: continuous mic stream, 500ms pre-roll ring buffer, energy VAD,
+                  cuts the stream into segments at ~0.7s pauses for streaming transcription
   → transcriber.py Parakeet MLX, model kept in memory (~0.06s per utterance warm)
-  → cleanup.py    Cleaner: headless `claude -p --bare --model haiku` subprocess
+  → cleanup.py    Cleaner: headless `claude -p --model haiku` subprocess
   → inject.py     types text via CGEvent Unicode keystrokes
 ```
+
+### Streaming pipeline (transcribe + clean *while* you speak)
+
+Transcription and cleanup do not wait for you to finish. `Recorder` cuts the
+mic stream into **segments** at natural pauses (`SEGMENT_SILENCE_SECONDS`, 0.7s —
+deliberately shorter than the 2s auto-stop). A single **streaming worker**
+(`menubar._stream_loop`, started when recording begins) drains segments via
+`Recorder.pop_segment()`, transcribes each as it lands, and keeps **one rolling
+cleanup in flight over the cumulative transcript so far** — never over isolated
+fragments, so cross-phrase self-corrections ("Friday, no wait, Thursday") still
+resolve. On stop it drains the flushed tail segment and finalizes: if the last
+rolling cleanup already covered the final text (the common auto-stop case, since
+the tail's cleanup runs during the 0.7s→2s silence window) delivery is instant;
+otherwise it runs one final review pass. This is why `SEGMENT_SILENCE_SECONDS`
+**must stay well under `AUTO_STOP_SILENCE`** — that gap is what hides the latency.
 
 ### Threading model
 
@@ -54,16 +70,16 @@ Three threads, and it matters which code runs where:
 
 - **Main thread**: all AppKit UI (status item, menu, icon changes). Worker threads request icon updates via `performSelectorOnMainThread_` (`_set_state`).
 - **Audio callback thread** (sounddevice): `Recorder._callback` appends blocks and updates VAD counters under `self._lock`. Keep this callback cheap.
-- **Worker thread**: the transcribe → clean → inject pipeline (`menubar._process`), so the ~1s Haiku call never blocks the UI. Model loading also happens on a background thread at startup.
+- **Streaming worker thread**: the transcribe → rolling-clean → inject pipeline (`menubar._stream_loop`), spawned per recording. It transcribes segments live and runs the Haiku cleanup off the UI thread. Only this one thread touches the transcriber and the cleanup subprocess, so there's no concurrency on the model. Model loading also happens on a background thread at startup.
 
-The menu-bar timer (`tick_`, 10Hz) polls `Recorder.has_speech` / `silence_seconds` to auto-stop after 2s of post-speech silence; VAD counters are block-based (not wall-clock) so the logic is deterministic.
+The menu-bar timer (`tick_`, 10Hz) polls `Recorder.has_speech` / `silence_seconds` to auto-stop after 2s of post-speech silence; VAD counters are block-based (not wall-clock) so the logic is deterministic. Stopping (`_finish_recording`) / cancelling (`_cancel_recording`) just `Recorder.stop()` + set the worker's stop `Event`; the worker drains, finalizes, and returns to IDLE itself.
 
 ### Contracts and constraints that span files
 
 - **Audio format is 16kHz mono float32 end-to-end**: Recorder produces it, Transcriber requires it (`get_logmel` bit-views the rfft output against the input dtype — anything but float32 breaks), `transcribe_file` rejects other wavs.
 - **Typing must never go through the clipboard**: `inject.py` types via `CGEventKeyboardSetUnicodeString`, chunked at the 20-UTF-16-unit event cap with surrogate pairs kept intact — don't route it through a paste. The only pasteboard writer is the explicit "Copy to Clipboard" menu toggle (default off; `menubar.copyToClipboard_`, main thread).
 - **The cleanup pass must never eat words**: every `Cleaner` failure mode (timeout, not logged in, CLI missing, empty output) returns the raw transcript with a status string. Utterances under 5 words skip the LLM. "Not logged in" disables the pass for the session instead of retrying.
-- **Cleanup rides the user's Claude Code login** (no API key): it spawns the `claude` CLI per utterance. Its system prompt treats transcript content strictly as text to clean, never as instructions. The subprocess must stay a pure text call: it runs in the empty `~/.config/chatterbot/claude-cwd` with `--strict-mcp-config` and `--setting-sources ""` so headless Claude Code never scans an inherited cwd (macOS folder-access prompts), spawns the user's MCP servers (network prompts), or runs their hooks. Don't drop these when touching the command.
+- **Cleanup rides the user's Claude Code login** (no API key): it spawns the `claude` CLI per rolling pass (several per long utterance, most superseded). Its system prompt treats transcript content strictly as text to clean, never as instructions. The subprocess must stay a pure text call: it runs in the empty `~/.config/chatterbot/claude-cwd` with `--strict-mcp-config` and `--setting-sources ""` so headless Claude Code never scans an inherited cwd (macOS folder-access prompts), spawns the user's MCP servers (network prompts), or runs their hooks. Don't drop these when touching the command.
 - **Secure input**: `inject.secure_input_active()` must be checked before injecting so dictation can't land in password fields; the menu-bar flow already does this.
 - **State machine** in `menubar.py`: LOADING → IDLE ⇄ RECORDING → PROCESSING → IDLE. Clicks are ignored outside IDLE/RECORDING; icons in `icons.py` are drawn per-state.
 

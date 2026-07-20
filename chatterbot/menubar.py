@@ -57,6 +57,9 @@ class ChatterBotApp(NSObject):
         self._recorder = None
         self._transcriber = None
         self._cleaner = None
+        self._stream_thread = None
+        self._stream_stop = None
+        self._stream_cancel = False
         return self
 
     # --- lifecycle ---
@@ -143,6 +146,7 @@ class ChatterBotApp(NSObject):
         if self._state == IDLE:
             self._recorder.open()
             self._recorder.start()
+            self._start_stream_worker()
             self._set_state(RECORDING)
             print("● recording ... (auto-stops on silence, or click again)", flush=True)
         elif self._state == RECORDING:
@@ -183,72 +187,134 @@ class ChatterBotApp(NSObject):
         if r.has_speech and r.silence_seconds >= AUTO_STOP_SILENCE:
             self._finish_recording("silence")
         elif not r.has_speech and r.recorded_seconds >= NO_SPEECH_TIMEOUT:
-            r.stop()
-            r.close()
-            self._set_state(IDLE)
-            print("○ no speech detected — cancelled", flush=True)
+            self._cancel_recording("no speech detected")
         elif r.recorded_seconds >= MAX_UTTERANCE:
             self._finish_recording("max length")
 
     @objc.python_method
     def _finish_recording(self, reason: str) -> None:
-        samples = self._recorder.stop()
+        # stop() flushes the voiced tail as a final segment; the worker drains
+        # it, runs the review pass, delivers, then flips back to IDLE itself.
+        self._recorder.stop()
         self._recorder.close()
         self._set_state(PROCESSING)
         print(f"○ stopped ({reason})", flush=True)
-        threading.Thread(target=self._process, args=(samples,), daemon=True).start()
-
-    # --- pipeline (worker thread) ---
+        self._stream_stop.set()
 
     @objc.python_method
-    def _process(self, samples) -> None:
+    def _cancel_recording(self, reason: str) -> None:
+        self._recorder.stop()
+        self._recorder.close()
+        self._stream_cancel = True
+        self._set_state(PROCESSING)  # lock out clicks until the worker reaches IDLE
+        self._stream_stop.set()
+        print(f"○ {reason} — cancelled", flush=True)
+
+    # --- streaming pipeline (worker thread) ---
+
+    @objc.python_method
+    def _start_stream_worker(self) -> None:
+        self._stream_stop = threading.Event()
+        self._stream_cancel = False
+        app_name = None
+        if self._cleaner is not None:
+            from chatterbot.cleanup import frontmost_app_name
+
+            # capture the destination app now, while it's still frontmost —
+            # after we stop, focus may have moved to us
+            app_name = frontmost_app_name()
+        self._stream_thread = threading.Thread(
+            target=self._stream_loop, args=(app_name,), daemon=True
+        )
+        self._stream_thread.start()
+
+    @objc.python_method
+    def _stream_loop(self, app_name) -> None:
+        """Transcribe segments as they arrive, keep one rolling cleanup in
+        flight over the cumulative transcript, then finalize on stop."""
         import time
 
+        raw_parts: list[str] = []
+        last_in = last_out = last_status = None
+
+        def drain_one() -> bool:
+            seg = self._recorder.pop_segment()
+            if seg is None:
+                return False
+            piece = self._transcriber.transcribe(seg).strip()
+            if piece:
+                raw_parts.append(piece)
+            return True
+
+        try:
+            while True:
+                if drain_one():
+                    continue
+                # queue empty. stop() flushes the tail under the lock *before*
+                # setting the event, so once we observe stop, one more full
+                # drain captures that final segment — then we're done.
+                if self._stream_stop.is_set():
+                    while drain_one():
+                        pass
+                    break
+                raw = " ".join(raw_parts).strip()
+                if self._cleaner is not None and raw and raw != last_in:
+                    # rolling pass over everything said so far (full context)
+                    last_out, last_status = self._cleaner.clean(raw, app_name)
+                    last_in = raw
+                    continue
+                time.sleep(0.03)
+
+            raw = " ".join(raw_parts).strip()
+            if self._stream_cancel or not raw:
+                return
+            print(f"  transcribed ({len(raw_parts)} segment(s)): {raw!r}", flush=True)
+            if self._cleaner is None:
+                text = raw
+            elif raw == last_in:
+                text, status = last_out, f"{last_status} (streamed)"
+                print(f"  ✦ {status}: {text!r}", flush=True)
+            else:
+                text, status = self._cleaner.clean(raw, app_name)
+                print(f"  ✦ {status}: {text!r}", flush=True)
+            self._deliver(text)
+        except Exception as e:  # noqa: BLE001 — keep the app alive no matter what
+            print(f"  ⚠ error: {e!r}", flush=True)
+        finally:
+            self._set_state(IDLE)
+
+    @objc.python_method
+    def _deliver(self, text: str) -> None:
         from chatterbot.inject import (
             accessibility_trusted,
             insert_text,
             secure_input_active,
         )
 
-        try:
-            t0 = time.perf_counter()
-            text = self._transcriber.transcribe(samples)
-            print(
-                f"  transcribed {len(samples) / 16_000:.1f}s audio "
-                f"in {time.perf_counter() - t0:.2f}s: {text!r}"
+        if not text:
+            return
+        delivered = []
+        if self._settings["copy_to_clipboard"]:
+            # NSPasteboard isn't documented thread-safe — hop to main
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "copyToClipboard:", text, False
             )
-            if self._cleaner is not None and text:
-                from chatterbot.cleanup import frontmost_app_name
-
-                text, status = self._cleaner.clean(text, frontmost_app_name())
-                print(f"  ✦ {status}: {text!r}", flush=True)
-            if text:
-                delivered = []
-                if self._settings["copy_to_clipboard"]:
-                    # NSPasteboard isn't documented thread-safe — hop to main
-                    self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                        "copyToClipboard:", text, False
-                    )
-                    delivered.append("clipboard")
-                if self._settings["type_at_cursor"]:
-                    if secure_input_active():
-                        print("  ⚠ secure input field active — not typing", flush=True)
-                    elif not accessibility_trusted():
-                        print(
-                            "  ⚠ no Accessibility permission — keystrokes are being "
-                            "dropped. Grant ChatterBot.app in System Settings → "
-                            "Privacy & Security → Accessibility, then relaunch.",
-                            flush=True,
-                        )
-                    else:
-                        insert_text(text + " ")
-                        delivered.append("typed")
-                if not delivered:
-                    print("  ⚠ both outputs disabled — text not delivered", flush=True)
-        except Exception as e:  # noqa: BLE001 — keep the app alive no matter what
-            print(f"  ⚠ error: {e!r}", flush=True)
-        finally:
-            self._set_state(IDLE)
+            delivered.append("clipboard")
+        if self._settings["type_at_cursor"]:
+            if secure_input_active():
+                print("  ⚠ secure input field active — not typing", flush=True)
+            elif not accessibility_trusted():
+                print(
+                    "  ⚠ no Accessibility permission — keystrokes are being "
+                    "dropped. Grant ChatterBot.app in System Settings → "
+                    "Privacy & Security → Accessibility, then relaunch.",
+                    flush=True,
+                )
+            else:
+                insert_text(text + " ")
+                delivered.append("typed")
+        if not delivered:
+            print("  ⚠ both outputs disabled — text not delivered", flush=True)
 
     def copyToClipboard_(self, text) -> None:
         pb = NSPasteboard.generalPasteboard()
