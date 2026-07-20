@@ -22,4 +22,13 @@ clang launcher.c \
   -o build/ChatterBot.app/Contents/MacOS/ChatterBot \
   -L"$pyroot/lib" -lpython3.12 -Wl,-rpath,"$pyroot/lib"
 
+# Ad-hoc codesign with a stable identifier so the bundle has a durable
+# identity for TCC. The linker's own ad-hoc signature leaves Info.plist
+# unbound and is treated as unstable: macOS then won't reliably show the
+# Accessibility prompt or persist the grant, and injected keystrokes get
+# silently dropped. --identifier matches the bundle id so `tccutil reset
+# Accessibility com.chatterbot.app` targets it.
+codesign --force --deep --sign - --identifier com.chatterbot.app \
+  build/ChatterBot.app
+
 echo "built build/ChatterBot.app (libpython: $pyroot/lib)"
